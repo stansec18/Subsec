@@ -40,7 +40,7 @@
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/<your-username>/Subsec.git
+git clone https://github.com/stansec18/Subsec.git
 cd Subsec
 pip install -r requirements.txt
 ```
