@@ -2,7 +2,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Version](https://img.shields.io/badge/Version-1.0-orange.svg)
+![Version](https://img.shields.io/badge/Version-1.2.0-orange.svg)
 
 **Subsec** is a subdomain enumeration and takeover-detection tool for penetration testers, bug bounty hunters, and security researchers. It pulls from multiple passive intelligence sources, supports multi-threaded brute forcing, checks every resolved host for dangling-CNAME subdomain takeover, and produces reports in four formats.
 
@@ -40,12 +40,33 @@
 ## 📦 Installation
 
 ```bash
-git clone https://github.com/stansec18/Subsec.git
+git clone https://github.com/<your-username>/Subsec.git
 cd Subsec
 pip install -r requirements.txt
 ```
 
 `dnspython` is the only dependency — it enables proper CNAME-chain resolution. The tool still runs without it, with weaker takeover detection.
+
+---
+
+## 🔄 Updating
+
+Check your current version anytime with:
+```bash
+python3 Subsec.py --version
+```
+
+**If you cloned with `git`:**
+```bash
+cd Subsec
+git pull origin main
+pip install -r requirements.txt --break-system-packages   # in case dependencies changed
+```
+
+**If you downloaded a ZIP or copied files manually (no git):**
+Grab the latest release from the [Releases page](../../releases) and overwrite your old files — there's no automatic way to sync without git.
+
+Either way, re-check `python3 Subsec.py --version` afterward to confirm the update landed.
 
 ---
 
@@ -89,11 +110,29 @@ python3 Subsec.py -d example.com -b --takeover --dirb -t 80 -o full --format all
 ```
 
 ### Use external intelligence sources (Shodan, VirusTotal, Censys, FOFA, Google)
+
+**Simplest way — a config file (recommended):**
+```bash
+cp config.env.example config.env
+nano config.env   # paste your keys in, save
+python3 Subsec.py -d example.com --takeover -o report
+```
+That's it — no exporting anything, no retyping flags every run. `config.env` is gitignored by default so your keys never end up committed.
+
+**Or, environment variables:**
 ```bash
 export SHODAN_API_KEY="your_key"
 export VT_API_KEY="your_key"
 python3 Subsec.py -d example.com --takeover -o report
 ```
+
+**Or, CLI flags for a one-off run:**
+```bash
+python3 Subsec.py -d example.com --shodan-key "your_key" --vt-key "your_key" -o report
+```
+
+All three work together — priority is **CLI flag > environment variable > config.env** — so a flag on the command line always wins if you need to override just for one run.
+
 Sources without a configured key are skipped automatically — the tool tells you which ones and how to enable them, it never fails the whole scan over a missing key.
 
 ### Restrict which passive sources run
@@ -113,7 +152,7 @@ python3 Subsec.py -d example.com --sources crtsh,shodan,virustotal
 | FOFA | https://fofa.info/user/register | Yes, limited queries |
 | Google Custom Search | https://programmablesearchengine.google.com/ (create an engine set to search the entire web) + https://console.cloud.google.com/apis/credentials (enable "Custom Search API", create a key) | Yes, 100 queries/day |
 
-Pass keys via CLI flags (`--shodan-key`, `--vt-key`, etc.) or environment variables (`SHODAN_API_KEY`, `VT_API_KEY`, `CENSYS_API_ID`/`CENSYS_API_SECRET`, `FOFA_EMAIL`/`FOFA_KEY`, `GOOGLE_API_KEY`/`GOOGLE_CX`) — env vars are recommended so keys never end up in shell history or scan output.
+Pass keys via CLI flags (`--shodan-key`, `--vt-key`, etc.), environment variables (`SHODAN_API_KEY`, `VT_API_KEY`, `CENSYS_API_ID`/`CENSYS_API_SECRET`, `FOFA_EMAIL`/`FOFA_KEY`, `GOOGLE_API_KEY`/`GOOGLE_CX`), or — easiest — `config.env` (see above). Env vars and `config.env` both keep keys out of your shell history and scan output; `config.env` additionally means you never have to re-export anything in a new terminal session.
 
 **findsubdomains.com** needs no key but is off by default since it's an unofficial scrape of their results page with no published API — enable explicitly with `--enable-findsubdomains` if you want to try it, understanding it may break or stop working without notice.
 
@@ -134,6 +173,7 @@ Pass keys via CLI flags (`--shodan-key`, `--vt-key`, etc.) or environment variab
 | `-v`, `--verbose` | Verbose output | Disabled |
 | `--format` | Output formats: `json,csv,txt,html` or `all` | `all` |
 | `--sources` | Comma-separated passive sources to use, or `all` | `all` |
+| `--config` | Path to a KEY=VALUE config file for API keys | `config.env` |
 | `--shodan-key` / `$SHODAN_API_KEY` | Shodan API key | - |
 | `--vt-key` / `$VT_API_KEY` | VirusTotal API key | - |
 | `--censys-id` / `--censys-secret` | Censys API credentials | - |
@@ -157,9 +197,12 @@ Subsec/
 ├── Subsec.py
 ├── requirements.txt
 ├── README.md
+├── config.env.example      # copy to config.env and fill in your API keys
+├── .gitignore               # keeps config.env and scan output out of git
 │
 └── wordlists/
-    └── common.txt
+    ├── common.txt           # subdomain brute-force wordlist
+    └── dirs.txt             # directory brute-force wordlist
 ```
 
 ---
