@@ -30,6 +30,16 @@ Directory brute                    : optional path brute force against every
                                       status codes
 Output                             : json, csv, txt, html (dark-theme report)
 
+Usage:
+    python3 Subsec.py -d example.com
+    python3 Subsec.py -d example.com -b --takeover -o report
+    python3 Subsec.py -d example.com -b --takeover --dirb -t 80 -o full --format all
+
+    # with external intelligence sources (set keys via flags or env vars)
+    export SHODAN_API_KEY=xxxx
+    export VT_API_KEY=xxxx
+    python3 Subsec.py -d example.com --takeover -o report
+
 Only scan domains you own or are explicitly authorized to test.
 """
 
@@ -58,7 +68,8 @@ try:
 except ImportError:
     HAVE_DNSPYTHON = False
 
-USER_AGENT = "Subsec/1.2 (+authorized-security-testing)"
+USER_AGENT = "Subsec/1.2.0 (+authorized-security-testing)"
+VERSION = "1.2.0"
 PRINT_LOCK = threading.Lock()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -214,6 +225,38 @@ def _owned_by(host, domain):
     (dot-boundary check — 'not-example.com' must NOT match 'example.com')."""
     host = host.rstrip(".")
     return host == domain or host.endswith("." + domain)
+
+
+def load_config(path):
+    """
+    Parses a simple KEY=VALUE config file (one per line, '#' comments and
+    blank lines ignored, surrounding quotes stripped). No extra dependency
+    needed. Returns {} if the file doesn't exist.
+    """
+    cfg = {}
+    if not path or not os.path.exists(path):
+        return cfg
+    with open(path, errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip().upper()
+            value = value.strip().strip('"').strip("'")
+            if key:
+                cfg[key] = value
+    return cfg
+
+
+def resolve_key(cli_value, env_name, config):
+    """Priority: CLI flag > environment variable > config file > None."""
+    if cli_value:
+        return cli_value
+    env_val = os.environ.get(env_name)
+    if env_val:
+        return env_val
+    return config.get(env_name)
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +492,7 @@ def source_findsubdomains(domain, verbose=False):
     return found
 
 
-def build_passive_sources(domain, args, verbose):
+def build_passive_sources(domain, args, config, verbose):
     """Returns (active_sources: {name: zero-arg callable}, skipped: [reason strings])."""
     active = {}
     skipped = []
@@ -474,46 +517,48 @@ def build_passive_sources(domain, args, verbose):
         if want(name):
             active[name] = fn
 
-    shodan_key = args.shodan_key or os.environ.get("SHODAN_API_KEY")
+    shodan_key = resolve_key(args.shodan_key, "SHODAN_API_KEY", config)
     if want("shodan"):
         if shodan_key:
             active["shodan"] = lambda: source_shodan(domain, shodan_key, verbose)
         else:
-            skipped.append("shodan (no key — set --shodan-key or $SHODAN_API_KEY)")
+            skipped.append("shodan (no key — set --shodan-key, $SHODAN_API_KEY, "
+                            "or SHODAN_API_KEY= in config.env)")
 
-    vt_key = args.vt_key or os.environ.get("VT_API_KEY")
+    vt_key = resolve_key(args.vt_key, "VT_API_KEY", config)
     if want("virustotal"):
         if vt_key:
             active["virustotal"] = lambda: source_virustotal(domain, vt_key, verbose)
         else:
-            skipped.append("virustotal (no key — set --vt-key or $VT_API_KEY)")
+            skipped.append("virustotal (no key — set --vt-key, $VT_API_KEY, "
+                            "or VT_API_KEY= in config.env)")
 
-    censys_id = args.censys_id or os.environ.get("CENSYS_API_ID")
-    censys_secret = args.censys_secret or os.environ.get("CENSYS_API_SECRET")
+    censys_id = resolve_key(args.censys_id, "CENSYS_API_ID", config)
+    censys_secret = resolve_key(args.censys_secret, "CENSYS_API_SECRET", config)
     if want("censys"):
         if censys_id and censys_secret:
             active["censys"] = lambda: source_censys(domain, censys_id, censys_secret, verbose)
         else:
-            skipped.append("censys (no credentials — set --censys-id/--censys-secret "
-                            "or $CENSYS_API_ID/$CENSYS_API_SECRET)")
+            skipped.append("censys (no credentials — set --censys-id/--censys-secret, "
+                            "$CENSYS_API_ID/$CENSYS_API_SECRET, or in config.env)")
 
-    fofa_email = args.fofa_email or os.environ.get("FOFA_EMAIL")
-    fofa_key = args.fofa_key or os.environ.get("FOFA_KEY")
+    fofa_email = resolve_key(args.fofa_email, "FOFA_EMAIL", config)
+    fofa_key = resolve_key(args.fofa_key, "FOFA_KEY", config)
     if want("fofa"):
         if fofa_email and fofa_key:
             active["fofa"] = lambda: source_fofa(domain, fofa_email, fofa_key, verbose)
         else:
-            skipped.append("fofa (no credentials — set --fofa-email/--fofa-key "
-                            "or $FOFA_EMAIL/$FOFA_KEY)")
+            skipped.append("fofa (no credentials — set --fofa-email/--fofa-key, "
+                            "$FOFA_EMAIL/$FOFA_KEY, or in config.env)")
 
-    google_key = args.google_api_key or os.environ.get("GOOGLE_API_KEY")
-    google_cx = args.google_cx or os.environ.get("GOOGLE_CX")
+    google_key = resolve_key(args.google_api_key, "GOOGLE_API_KEY", config)
+    google_cx = resolve_key(args.google_cx, "GOOGLE_CX", config)
     if want("google"):
         if google_key and google_cx:
             active["google"] = lambda: source_google_cse(domain, google_key, google_cx, verbose)
         else:
-            skipped.append("google (no key/CX — set --google-api-key/--google-cx "
-                            "or $GOOGLE_API_KEY/$GOOGLE_CX)")
+            skipped.append("google (no key/CX — set --google-api-key/--google-cx, "
+                            "$GOOGLE_API_KEY/$GOOGLE_CX, or in config.env)")
 
     if args.enable_findsubdomains and want("findsubdomains"):
         active["findsubdomains"] = lambda: source_findsubdomains(domain, verbose)
@@ -943,6 +988,7 @@ def main():
                      "Only use against domains you are authorized to test.",
     )
     ap.add_argument("-d", "--domain", required=True, help="Target domain, e.g. example.com")
+    ap.add_argument("--version", action="version", version=f"Subsec.py {VERSION}")
     ap.add_argument("-o", "--output", help="Output filename base (without extension)")
     ap.add_argument("-t", "--threads", type=int, default=50, help="Thread count for subdomain resolution (default 50)")
     ap.add_argument("-b", "--bruteforce", action="store_true", help="Enable subdomain wordlist brute force")
@@ -958,6 +1004,10 @@ def main():
                      help="Comma-separated list of passive sources to use, or 'all' (default). "
                           "Names: crtsh,alienvault,certspotter,hackertarget,rapiddns,wayback,"
                           "shodan,virustotal,censys,fofa,google,findsubdomains")
+    ap.add_argument("--config", default=os.path.join(SCRIPT_DIR, "config.env"),
+                     help="Path to a KEY=VALUE config file for API keys (default: config.env "
+                          "next to this script). CLI flags and env vars still take priority "
+                          "over this file if set.")
 
     ext = ap.add_argument_group("external intelligence sources (optional, need API keys/credentials)")
     ext.add_argument("--shodan-key", help="Shodan API key (or set $SHODAN_API_KEY)")
@@ -989,11 +1039,14 @@ def main():
         print("    pip install dnspython --break-system-packages\n")
 
     domain = args.domain.strip().lower()
+    config = load_config(args.config)
+    if config:
+        print(f"[*] Loaded {len(config)} value(s) from config file: {args.config}")
     hits = {}
     sources_used = []
 
     if not args.skip_passive:
-        active_sources, skipped = build_passive_sources(domain, args, args.verbose)
+        active_sources, skipped = build_passive_sources(domain, args, config, args.verbose)
         print(f"[*] Passive sources active: {', '.join(sorted(active_sources)) or 'none'}")
         for s in skipped:
             print(f"[*] Skipping {s}")
